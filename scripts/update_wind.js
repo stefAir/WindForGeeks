@@ -39,6 +39,7 @@ async function fetchGrid(modelName) {
       longitude: lonChunk.join(','),
       current: "wind_speed_10m,wind_direction_10m",
       models: modelName
+      wind_speed_unit: "ms"
     });
 
     let success = false;
