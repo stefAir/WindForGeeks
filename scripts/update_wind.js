@@ -34,7 +34,7 @@ async function fetchGrid(modelName) {
     const latChunk = gridLats.slice(i, i + batchSize);
     const lonChunk = gridLons.slice(i, i + batchSize);
     
-    const params = new URLSearchParams({
+  const params = new URLSearchParams({
       latitude: latChunk.join(','),
       longitude: lonChunk.join(','),
       current: "wind_speed_10m,wind_direction_10m",
