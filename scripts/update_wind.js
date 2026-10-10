@@ -7,7 +7,6 @@ const minLon = -6.0, maxLon = 10.0;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Helper to format logs with timestamps
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`);
 }
@@ -26,7 +25,8 @@ async function fetchGrid(modelName) {
   }
 
   const jsonList = [];
-  const batchSize = 100; 
+  // Reduced batch size to reduce payload size per request
+  const batchSize = 80; 
   const totalChunks = Math.ceil(gridLats.length / batchSize);
 
   for (let i = 0; i < gridLats.length; i += batchSize) {
@@ -43,31 +43,40 @@ async function fetchGrid(modelName) {
 
     let success = false;
     let retries = 0;
+    const maxRetries = 8;
     
-    while (retries < 6 && !success) {
-      const res = await fetch("https://api.open-meteo.com/v1/forecast?" + params);
-      
-      if (res.status === 429) {
+    while (retries < maxRetries && !success) {
+      try {
+        const res = await fetch("https://api.open-meteo.com/v1/forecast?" + params);
+        
+        if (res.status === 429) {
+          retries++;
+          const waitTime = retries * 8000; // 8s, 16s, 24s... backoff
+          log(`[WARNING] Rate Limited (429) on chunk ${chunkNum}/${totalChunks}. Waiting ${waitTime / 1000}s...`);
+          await sleep(waitTime);
+          continue;
+        }
+        
+        if (!res.ok) throw new Error(`API returned HTTP status ${res.status}`);
+        
+        const data = await res.json();
+        Array.isArray(data) ? jsonList.push(...data) : jsonList.push(data);
+        success = true;
+        log(`[SUCCESS] Fetched chunk ${chunkNum}/${totalChunks} (${latChunk.length} points)`);
+      } catch (err) {
+        // Catches low-level "fetch failed" socket errors and connection resets
         retries++;
-        const waitTime = retries * 5000;
-        log(`[WARNING] Rate Limited on chunk ${chunkNum}/${totalChunks}. Waiting ${waitTime / 1000}s...`);
+        if (retries >= maxRetries) {
+          throw new Error(`Failed chunk ${chunkNum}/${totalChunks} after ${maxRetries} retries: ${err.message}`);
+        }
+        const waitTime = retries * 6000;
+        log(`[WARNING] Network error on chunk ${chunkNum}/${totalChunks} (${err.message}). Retrying in ${waitTime / 1000}s...`);
         await sleep(waitTime);
-        continue;
       }
-      
-      if (!res.ok) throw new Error(`API Error: ${res.status}`);
-      
-      const data = await res.json();
-      Array.isArray(data) ? jsonList.push(...data) : jsonList.push(data);
-      success = true;
-      log(`[SUCCESS] Fetched chunk ${chunkNum}/${totalChunks} (${latChunk.length} points)`);
     }
     
-    if (!success) {
-      throw new Error(`CRITICAL: Failed to fetch chunk ${chunkNum} after max retries. Aborting.`);
-    }
-    
-    await sleep(1000); 
+    // Polite pause between successful chunks to keep Open-Meteo happy
+    await sleep(1500); 
   }
   
   return jsonList;
@@ -75,7 +84,7 @@ async function fetchGrid(modelName) {
 
 async function main() {
   const dataDir = path.join(__dirname, '../data');
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir);
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
   const formatPayload = (dataArray) => {
     const firstValid = dataArray.find(item => item && item.current && item.current.time);
@@ -92,6 +101,9 @@ async function main() {
   const iconData = await fetchGrid("icon_eu");
   fs.writeFileSync(path.join(dataDir, 'wind_icon_eu.json'), JSON.stringify(formatPayload(iconData)));
   log("Saved wind_icon_eu.json");
+
+  // Pause between models to reset burst limits
+  await sleep(3000);
 
   log("--- Fetching AROME ---");
   const aromeData = await fetchGrid("meteofrance_arome_france_hd");
