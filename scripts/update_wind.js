@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const stepDeg = 0.25;
+const stepDeg = 0.4;
 const maxLat = 52.0, minLat = 41.0;
 const minLon = -6.0, maxLon = 10.0;
 
@@ -25,7 +25,8 @@ async function fetchGrid(modelName) {
   }
 
   const jsonList = [];
-  const batchSize = 80; 
+  // Maximize the batch size to the Open-Meteo limit of 100
+  const batchSize = 100; 
   const totalChunks = Math.ceil(gridLats.length / batchSize);
 
   for (let i = 0; i < gridLats.length; i += batchSize) {
@@ -73,14 +74,12 @@ async function fetchGrid(modelName) {
       }
     }
     
-    // OPTIMIZATION: Proactive throttling to avoid burst limits
-    // After every 5 chunks, take a 10-second rest to reset the API's burst counter
+    // Throttling for shared IPs
     if (chunkNum % 5 === 0) {
       log(`[THROTTLE] Pausing for 10s to prevent burst rate limiting...`);
       await sleep(10000);
     } else {
-      // Standard polite pause between normal chunks
-      await sleep(1500); 
+      await sleep(3000); 
     }
   }
   
@@ -107,8 +106,8 @@ async function main() {
   fs.writeFileSync(path.join(dataDir, 'wind_icon_eu.json'), JSON.stringify(formatPayload(iconData)));
   log("Saved wind_icon_eu.json");
 
-  // Pause between models to reset burst limits
-  await sleep(3000);
+  // Pause between models to let the shared IP cool down
+  await sleep(5000);
 
   log("--- Fetching AROME ---");
   const aromeData = await fetchGrid("meteofrance_arome_france_hd");
