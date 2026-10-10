@@ -25,7 +25,6 @@ async function fetchGrid(modelName) {
   }
 
   const jsonList = [];
-  // Reduced batch size to reduce payload size per request
   const batchSize = 80; 
   const totalChunks = Math.ceil(gridLats.length / batchSize);
 
@@ -51,7 +50,7 @@ async function fetchGrid(modelName) {
         
         if (res.status === 429) {
           retries++;
-          const waitTime = retries * 8000; // 8s, 16s, 24s... backoff
+          const waitTime = retries * 8000; 
           log(`[WARNING] Rate Limited (429) on chunk ${chunkNum}/${totalChunks}. Waiting ${waitTime / 1000}s...`);
           await sleep(waitTime);
           continue;
@@ -64,7 +63,6 @@ async function fetchGrid(modelName) {
         success = true;
         log(`[SUCCESS] Fetched chunk ${chunkNum}/${totalChunks} (${latChunk.length} points)`);
       } catch (err) {
-        // Catches low-level "fetch failed" socket errors and connection resets
         retries++;
         if (retries >= maxRetries) {
           throw new Error(`Failed chunk ${chunkNum}/${totalChunks} after ${maxRetries} retries: ${err.message}`);
@@ -75,8 +73,15 @@ async function fetchGrid(modelName) {
       }
     }
     
-    // Polite pause between successful chunks to keep Open-Meteo happy
-    await sleep(1500); 
+    // OPTIMIZATION: Proactive throttling to avoid burst limits
+    // After every 5 chunks, take a 10-second rest to reset the API's burst counter
+    if (chunkNum % 5 === 0) {
+      log(`[THROTTLE] Pausing for 10s to prevent burst rate limiting...`);
+      await sleep(10000);
+    } else {
+      // Standard polite pause between normal chunks
+      await sleep(1500); 
+    }
   }
   
   return jsonList;
